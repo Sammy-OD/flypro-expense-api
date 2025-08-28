@@ -47,17 +47,19 @@ func main() {
 	// Repositories
 	userRepo := repository.NewUserRepository(db)
 	expenseRepo := repository.NewExpenseRepository(db)
+	reportRepo := repository.NewReportRepository(db)
 
 	// Services
 	currencySvc := services.NewCurrencyService(cfg, redis)
 	userSvc := services.NewUserService(userRepo, redis)
 	expenseSvc := services.NewExpenseService(expenseRepo, currencySvc, redis)
+	reportSvc := services.NewReportService(reportRepo, expenseRepo, currencySvc, redis)
 
 	// Validators
 	validators.RegisterCustomValidators()
 
 	// Routes
-	h := handlers.NewHandler(userSvc, expenseSvc)
+	h := handlers.NewHandler(userSvc, expenseSvc, reportSvc)
 	h.RegisterRoutes(r)
 
 	srv := &http.Server{

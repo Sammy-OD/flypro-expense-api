@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"time"
 
 	"flypro/internal/config"
@@ -14,6 +13,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// CurrencyService defines the behavior for currency conversion
 type CurrencyService interface {
 	ConvertCurrency(ctx context.Context, amount float64, from, to string) (float64, error)
 }
@@ -24,6 +24,7 @@ type currencyService struct {
 	hc    *http.Client
 }
 
+// NewCurrencyService creates a new currency service
 func NewCurrencyService(cfg *config.Config, cache *redis.Client) CurrencyService {
 	return &currencyService{
 		cfg:   cfg,
@@ -32,55 +33,49 @@ func NewCurrencyService(cfg *config.Config, cache *redis.Client) CurrencyService
 	}
 }
 
-// convert amount from->to using exchangerate.host latest endpoint (or similar) and cache rate for 6 hours.
+// API response structure from exchangerate-api.com
+type exchangeRateResponse struct {
+	ConversionRates map[string]float64 `json:"conversion_rates"`
+}
+
+// ConvertCurrency converts amount from one currency to another using exchangerate-api.com
 func (s *currencyService) ConvertCurrency(ctx context.Context, amount float64, from, to string) (float64, error) {
 	if from == to {
 		return amount, nil
 	}
-	key := fmt.Sprintf("fx:%s:%s", from, to)
-	if val, err := s.cache.Get(ctx, key).Float64(); err == nil {
+
+	cacheKey := fmt.Sprintf("fx:%s:%s", from, to)
+	if val, err := s.cache.Get(ctx, cacheKey).Float64(); err == nil {
 		return amount * val, nil
 	}
 
-	u, _ := url.Parse(s.cfg.FXAPIURL)
-	q := u.Query()
-	q.Set("base", from)
-	q.Set("symbols", to)
-	if s.cfg.FXAPIKey != "" {
-		q.Set("api_key", s.cfg.FXAPIKey)
-	}
-	u.RawQuery = q.Encode()
+	// Build API URL: https://v6.exchangerate-api.com/v6/{API_KEY}/latest/{BASE}
+	apiURL := fmt.Sprintf("%s/%s/latest/%s", s.cfg.FXAPIURL, s.cfg.FXAPIKey, from)
 
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
 	resp, err := s.hc.Do(req)
 	if err != nil {
-		// try stale cache
-		if val, err2 := s.cache.Get(ctx, key).Float64(); err2 == nil {
+		// fallback to stale cache
+		if val, err2 := s.cache.Get(ctx, cacheKey).Float64(); err2 == nil {
 			return amount * val, nil
 		}
-		return 0, err
+		return 0, fmt.Errorf("fx api request failed: %w", err)
 	}
 	defer resp.Body.Close()
-	b, _ := io.ReadAll(resp.Body)
 
-	var data struct {
-		Rates map[string]float64 `json:"rates"`
+	body, _ := io.ReadAll(resp.Body)
+	var data exchangeRateResponse
+	if err := json.Unmarshal(body, &data); err != nil {
+		return 0, fmt.Errorf("failed to parse fx api response: %w", err)
 	}
-	_ = json.Unmarshal(b, &data)
-	rate := data.Rates[to]
-	if rate <= 0 {
-		// try reverse rate
-		key2 := fmt.Sprintf("fx:%s:%s", to, from)
-		if val, err2 := s.cache.Get(ctx, key2).Float64(); err2 == nil && val > 0 {
-			if val != 0 {
-				rate = 1.0 / val
-			}
-		}
-	}
-	if rate <= 0 {
-		rate = 1
-	} // fallback safe-guard
 
-	_ = s.cache.Set(ctx, key, rate, 6*time.Hour).Err()
+	rate := data.ConversionRates[to]
+	if rate <= 0 {
+		return 0, fmt.Errorf("invalid rate for %s -> %s", from, to)
+	}
+
+	// cache rate for 6 hours
+	_ = s.cache.Set(ctx, cacheKey, rate, 6*time.Hour).Err()
+
 	return amount * rate, nil
 }

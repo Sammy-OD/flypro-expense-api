@@ -9,10 +9,11 @@ import (
 type Handler struct {
 	users    services.UserService
 	expenses services.ExpenseService
+	reports  services.ReportService
 }
 
-func NewHandler(u services.UserService, e services.ExpenseService) *Handler {
-	return &Handler{users: u, expenses: e}
+func NewHandler(u services.UserService, e services.ExpenseService, r services.ReportService) *Handler {
+	return &Handler{users: u, expenses: e, reports: r}
 }
 
 func (h *Handler) RegisterRoutes(r *gin.Engine) {
@@ -26,4 +27,9 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 	api.GET("/expenses/:id", h.GetExpense)
 	api.PUT("/expenses/:id", h.UpdateExpense)
 	api.DELETE("/expenses/:id", h.DeleteExpense)
+
+	api.POST("/reports", h.CreateReport)
+	api.GET("/reports", h.ListReports)
+	api.POST("/reports/:id/expenses", h.AddExpensesToReport)
+	api.PUT("/reports/:id/submit", h.SubmitReport)
 }

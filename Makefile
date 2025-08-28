@@ -6,6 +6,9 @@ DB_URL?=postgres://postgres:postgres@localhost:5432/flypro?sslmode=disable
 run:
 	go run ./cmd/server
 
+seed:
+	go run ./cmd/seed
+
 migrate-up:
 	goose -dir ./migrations postgres "$(DB_URL)" up
 
