@@ -15,6 +15,7 @@ import (
 	"flypro/internal/middleware"
 	"flypro/internal/repository"
 	"flypro/internal/services"
+	"flypro/internal/validators"
 )
 
 func main() {
@@ -45,12 +46,18 @@ func main() {
 
 	// Repositories
 	userRepo := repository.NewUserRepository(db)
+	expenseRepo := repository.NewExpenseRepository(db)
 
 	// Services
+	currencySvc := services.NewCurrencyService(cfg, redis)
 	userSvc := services.NewUserService(userRepo, redis)
+	expenseSvc := services.NewExpenseService(expenseRepo, currencySvc, redis)
+
+	// Validators
+	validators.RegisterCustomValidators()
 
 	// Routes
-	h := handlers.NewHandler(userSvc)
+	h := handlers.NewHandler(userSvc, expenseSvc)
 	h.RegisterRoutes(r)
 
 	srv := &http.Server{
